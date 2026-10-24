@@ -1,6 +1,12 @@
 package com.marco.zettel.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
@@ -36,12 +42,31 @@ fun Toolbar(vm: BoardViewModel, modifier: Modifier = Modifier) {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            listOf(Herramienta.MOVER).forEach { h ->
+            listOf(Herramienta.PLUMA, Herramienta.BORRADOR, Herramienta.MOVER).forEach { h ->
                 FilterChip(
                     selected = vm.herramienta == h,
                     onClick = { vm.herramienta = h },
                     label = { Text(h.etiqueta) },
                 )
+            }
+
+            if (vm.herramienta == Herramienta.PLUMA) {
+                BoardViewModel.COLORES_TINTA.forEach { c ->
+                    Box(
+                        Modifier
+                            .size(30.dp)
+                            .background(Color(c), CircleShape)
+                            .border(if (vm.colorPluma == c) 3.dp else 1.dp, if (vm.colorPluma == c) Color(0xFF1F6FEB) else Color.Gray, CircleShape)
+                            .clickable { vm.colorPluma = c },
+                    )
+                }
+                BoardViewModel.GROSORES_TINTA.forEachIndexed { i, g ->
+                    FilterChip(
+                        selected = vm.grosorPluma == g,
+                        onClick = { vm.grosorPluma = g },
+                        label = { Text(listOf("Fino", "Medio", "Grueso")[i]) },
+                    )
+                }
             }
 
             var menu by remember { mutableStateOf(false) }

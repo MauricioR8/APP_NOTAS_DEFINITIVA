@@ -57,6 +57,8 @@ fun BoardCanvas(vm: BoardViewModel, modifier: Modifier = Modifier) {
                     val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                     when {
                         down.type == PointerType.Touch -> gestoTactil(down, vm, cam, toque)
+                        // El extremo borrador del S Pen borra sin cambiar de herramienta.
+                        down.type == PointerType.Eraser -> gestoLapiz(down, Herramienta.BORRADOR, vm, cam)
                         vm.herramienta != Herramienta.PLUMA -> gestoLapiz(down, vm.herramienta, vm, cam)
                         // PLUMA con lápiz/ratón: lo procesa la capa de tinta (hija de este Box).
                     }
@@ -66,6 +68,8 @@ fun BoardCanvas(vm: BoardViewModel, modifier: Modifier = Modifier) {
         Canvas(Modifier.fillMaxSize()) {
             if (escena != null && cam.iniciada) dibujarTablero(vm, escena, cam, recursos)
         }
+        // Tinta "mojada" de baja latencia, encima del lienzo.
+        CapaTinta(vm, cam)
     }
 }
 

@@ -2,8 +2,11 @@ package com.marco.zettel.ui
 
 import android.util.Log
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.ink.strokes.Stroke
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.marco.zettel.data.db.NoteEntity
@@ -12,6 +15,7 @@ import com.marco.zettel.data.repo.StrokeCodec
 import com.marco.zettel.data.repo.ZettelRepository
 import com.marco.zettel.domain.model.NoteType
 import com.marco.zettel.domain.model.ROOT_BOARD_ID
+import com.marco.zettel.domain.spatial.WRect
 import com.marco.zettel.ui.canvas.BoardScene
 import com.marco.zettel.ui.canvas.Camera
 import com.marco.zettel.ui.canvas.CardData
@@ -43,7 +47,12 @@ class BoardViewModel(private val repo: ZettelRepository) : ViewModel() {
         private set
     var camara by mutableStateOf(Camera())
         private set
-    var herramienta by mutableStateOf(Herramienta.MOVER)
+    var herramienta by mutableStateOf(Herramienta.PLUMA)
+
+    // Pincel actual (la tinta es lo primero: la app arranca con la pluma activa).
+    var familiaPluma by mutableStateOf(StrokeCodec.PLUMA)
+    var colorPluma by mutableIntStateOf(COLORES_TINTA[0])
+    var grosorPluma by mutableFloatStateOf(2.5f)
 
     var tarjetaSel by mutableStateOf<CardData?>(null)
         private set
@@ -250,12 +259,17 @@ class BoardViewModel(private val repo: ZettelRepository) : ViewModel() {
                     modo = Modo.PANEAR
                 }
             }
+            Herramienta.BORRADOR -> borrarEn(wx, wy)
             else -> Unit
         }
     }
 
     fun herramientaMover(h: Herramienta, wx: Float, wy: Float, px: Float, py: Float) {
         val e = escena ?: return
+        if (h == Herramienta.BORRADOR) {
+            borrarEn(wx, wy)
+            return
+        }
         when (modo) {
             Modo.MOVER -> objetivo?.let { e.geometria(it, wx - offX, wy - offY, it.w, it.h) }
             Modo.REDIMENSIONAR -> objetivo?.let {
@@ -276,6 +290,73 @@ class BoardViewModel(private val repo: ZettelRepository) : ViewModel() {
         }
         modo = Modo.NADA
         objetivo = null
+        if (h == Herramienta.BORRADOR && borrados.isNotEmpty()) {
+            val ids = borrados.toList()
+            borrados.clear()
+            persistir { repo.eliminarTrazos(ids) }
+        }
+    }
+
+    // ---- Tinta -----------------------------------------------------------------------------
+
+    /**
+     * Jetpack Ink entrega los trazos terminados en el hilo de UI; hay que añadirlos a la escena
+     * en esa misma pasada para que no parpadeen. Si el trazo empieza dentro de una tarjeta (que no
+     * sea un tablero) pertenece a esa nota; si no, es un trazo libre del tablero.
+     */
+    fun trazosTerminados(lista: List<Stroke>, familia: String) {
+        val e = escena ?: return
+        for (st in lista) {
+            if (st.inputs.size == 0) continue
+            val primero = st.inputs[0]
+            val tarjeta = e.tarjetaEn(primero.x, primero.y)?.takeIf { it.tipo != NoteType.INDEX }
+            val entidad = StrokeCodec.aEntidad(
+                stroke = st,
+                familia = familia,
+                noteId = tarjeta?.note?.id ?: e.boardId,
+                originX = tarjeta?.x ?: 0f,
+                originY = tarjeta?.y ?: 0f,
+            )
+            val datos = StrokeData(entidad, st)
+            if (tarjeta != null) tarjeta.strokes.add(datos) else e.agregarTrazoLibre(datos)
+            persistir { repo.guardarTrazo(entidad) }
+        }
+        e.redibujar()
+    }
+
+    // ---- Borrador --------------------------------------------------------------------------
+    private val borrados = ArrayList<String>()
+
+    private fun borrarEn(wx: Float, wy: Float) {
+        val e = escena ?: return
+        val r = RADIO_BORRADOR_PX / camara.scale
+        val zona = WRect(wx - r, wy - r, wx + r, wy + r)
+        var cambio = false
+        for (item in e.arbol.consultar(zona)) {
+            when (item) {
+                is StrokeData -> if (item.bounds.intersects(zona) &&
+                    item.cercaDe(wx, wy, r + item.entity.brushSize / 2, 0f, 0f)
+                ) {
+                    e.quitarTrazoLibre(item)
+                    borrados.add(item.id)
+                    cambio = true
+                }
+                is CardData -> if (item.rect.contains(wx, wy)) {
+                    val it2 = item.strokes.iterator()
+                    while (it2.hasNext()) {
+                        val t = it2.next()
+                        val dx = item.x - t.entity.originX
+                        val dy = item.y - t.entity.originY
+                        if (t.cercaDe(wx, wy, r + t.entity.brushSize / 2, dx, dy)) {
+                            it2.remove()
+                            borrados.add(t.id)
+                            cambio = true
+                        }
+                    }
+                }
+            }
+        }
+        if (cambio) e.redibujar()
     }
 
     override fun onCleared() {
@@ -289,5 +370,10 @@ class BoardViewModel(private val repo: ZettelRepository) : ViewModel() {
         const val MIN_ANCHO = 110f
         const val MIN_ALTO = 70f
         const val TOLERANCIA_PX = 40f
+        const val RADIO_BORRADOR_PX = 18f
+
+        /** Colores de tinta (ARGB): negro, azul, rojo, verde. */
+        val COLORES_TINTA = intArrayOf(0xFF1A1A1A.toInt(), 0xFF1F5FD0.toInt(), 0xFFD0342C.toInt(), 0xFF1E8E3E.toInt())
+        val GROSORES_TINTA = floatArrayOf(1.5f, 2.5f, 5f)
     }
 }
