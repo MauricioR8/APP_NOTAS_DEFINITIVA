@@ -2,6 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <application
+        android:name=".ZettelApplication"
         android:allowBackup="true"
         android:label="Zettel Notas"
         android:supportsRtl="true"
