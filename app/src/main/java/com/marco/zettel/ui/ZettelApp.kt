@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.marco.zettel.ui.canvas.BoardCanvas
+import com.marco.zettel.ui.panel.PanelEnlace
 import com.marco.zettel.ui.panel.SidePanel
 
 @Composable
@@ -41,6 +42,7 @@ fun ZettelApp(vm: BoardViewModel) {
                         }
                     }
                 }
+                vm.enlaceSel?.let { PanelEnlace(vm, it, Modifier.align(Alignment.CenterEnd)) }
                 vm.tarjetaSel?.let { SidePanel(vm, it, Modifier.align(Alignment.CenterEnd)) }
             }
         }

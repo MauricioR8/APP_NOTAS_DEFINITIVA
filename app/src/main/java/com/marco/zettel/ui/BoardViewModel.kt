@@ -135,15 +135,68 @@ class BoardViewModel(private val repo: ZettelRepository) : ViewModel() {
         camara.mundoX(vistaAncho / 2f) to camara.mundoY(vistaAlto / 2f)
 
     // ---- Selección -------------------------------------------------------------------------
+    var enlaceSel by mutableStateOf<LinkData?>(null)
+        private set
+
     fun seleccionar(c: CardData) {
+        enlaceSel?.enSeleccion = false
+        enlaceSel = null
         tarjetaSel = c
         val e = escena ?: return
         if (e.alFrente(c)) persistir { repo.geometria(c.aUbicacion(e.boardId)) }
     }
 
+    fun seleccionarEnlace(l: LinkData) {
+        enlaceSel?.enSeleccion = false
+        tarjetaSel = null
+        enlaceSel = l
+        l.enSeleccion = true
+        escena?.redibujar()
+    }
+
     fun deseleccionar() {
         tarjetaSel = null
+        enlaceSel?.enSeleccion = false
+        enlaceSel = null
     }
+
+    // ---- Enlaces ---------------------------------------------------------------------------
+    /** Dibujar un conector entre dos tarjetas crea un enlace real entre sus notas. */
+    private fun conectar(a: CardData, b: CardData) {
+        val e = escena ?: return
+        if (a === b) return
+        e.enlaces.firstOrNull { it.origen == a.note.id && it.destino == b.note.id }?.let {
+            seleccionarEnlace(it)
+            return
+        }
+        viewModelScope.launch {
+            val l = repo.crearEnlace(a.note.id, b.note.id) ?: return@launch
+            if (escena !== e) return@launch
+            val datos = LinkData(l.id, l.sourceNoteId, l.targetNoteId, l.relationType)
+            e.enlaces.add(datos)
+            e.redibujar()
+            seleccionarEnlace(datos)
+        }
+    }
+
+    fun relacionDeEnlace(l: LinkData, relacion: String) {
+        l.relacion = relacion
+        persistir { repo.relacionDeEnlace(l.id, relacion) }
+        escena?.redibujar()
+    }
+
+    fun eliminarEnlace(l: LinkData) {
+        escena?.enlaces?.remove(l)
+        if (enlaceSel === l) deseleccionar()
+        escena?.redibujar()
+        persistir { repo.eliminarEnlace(l.id) }
+    }
+
+    // Conector en curso (herramienta CONECTAR).
+    var conexionOrigen by mutableStateOf<CardData?>(null)
+        private set
+    internal var conexionX = 0f
+    internal var conexionY = 0f
 
     // ---- Tarjetas --------------------------------------------------------------------------
     fun nuevaTarjeta(tipo: NoteType, wx: Float? = null, wy: Float? = null) {
@@ -217,10 +270,15 @@ class BoardViewModel(private val repo: ZettelRepository) : ViewModel() {
         val c = e.tarjetaEn(wx, wy)
         if (c != null) {
             seleccionar(c)
-        } else {
-            deseleccionar()
-            if (doble) nuevaTarjeta(NoteType.PERMANENT, wx, wy)
+            return
         }
+        val l = e.enlaceEn(wx, wy, TOLERANCIA_PX / camara.scale)
+        if (l != null) {
+            seleccionarEnlace(l)
+            return
+        }
+        deseleccionar()
+        if (doble) nuevaTarjeta(NoteType.PERMANENT, wx, wy)
     }
 
     // ---- Herramienta MOVER con el lápiz ----------------------------------------------------
@@ -255,9 +313,15 @@ class BoardViewModel(private val repo: ZettelRepository) : ViewModel() {
                     offX = wx - c.x
                     offY = wy - c.y
                 } else {
-                    deseleccionar()
+                    val l = e.enlaceEn(wx, wy, tol)
+                    if (l != null) seleccionarEnlace(l) else deseleccionar()
                     modo = Modo.PANEAR
                 }
+            }
+            Herramienta.CONECTAR -> {
+                conexionOrigen = e.tarjetaEn(wx, wy)
+                conexionX = wx
+                conexionY = wy
             }
             Herramienta.BORRADOR -> borrarEn(wx, wy)
             Herramienta.LAZO -> {
@@ -276,6 +340,12 @@ class BoardViewModel(private val repo: ZettelRepository) : ViewModel() {
         }
         if (h == Herramienta.LAZO) {
             anadirPuntoLazo(wx, wy)
+            e.redibujar()
+            return
+        }
+        if (h == Herramienta.CONECTAR) {
+            conexionX = wx
+            conexionY = wy
             e.redibujar()
             return
         }
@@ -300,6 +370,13 @@ class BoardViewModel(private val repo: ZettelRepository) : ViewModel() {
         modo = Modo.NADA
         objetivo = null
         if (h == Herramienta.LAZO) cerrarLazo()
+        if (h == Herramienta.CONECTAR) {
+            val origen = conexionOrigen
+            val destino = e?.tarjetaEn(wx, wy)
+            conexionOrigen = null
+            if (origen != null && destino != null) conectar(origen, destino)
+            e?.redibujar()
+        }
         if (h == Herramienta.BORRADOR && borrados.isNotEmpty()) {
             val ids = borrados.toList()
             borrados.clear()

@@ -105,6 +105,12 @@ internal fun DrawScope.dibujarTablero(vm: BoardViewModel, e: BoardScene, cam: Ca
     }) {
         dibujarEnlaces(e, vista, s, r)
         for (c in tarjetas) dibujarTarjeta(c, c === sel, s, r)
+        vm.conexionOrigen?.let { o ->
+            val (bx, by) = SegmentoEnlace.bordeHacia(o, vm.conexionX, vm.conexionY)
+            val destino = e.tarjetaEn(vm.conexionX, vm.conexionY)
+            val color = if (destino != null && destino !== o) Paleta.Seleccion else Paleta.Enlace
+            flecha(bx, by, vm.conexionX, vm.conexionY, color, maxOf(2.5f, 2.5f / s * r.densidad), s, r)
+        }
         if (sel != null && herramienta == Herramienta.MOVER) {
             val lado = 14f / s * r.densidad
             drawRect(
