@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.marco.zettel"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.marco.zettel"
