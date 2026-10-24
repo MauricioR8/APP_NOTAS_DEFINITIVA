@@ -5,6 +5,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -113,6 +114,35 @@ internal fun DrawScope.dibujarTablero(vm: BoardViewModel, e: BoardScene, cam: Ca
             )
         }
         for (t in trazos) dibujarTrazo(t, s, r)
+        dibujarLazo(vm, s, r)
+    }
+}
+
+/** Lazo en curso (línea discontinua) y resalte de los trazos seleccionados. */
+private fun DrawScope.dibujarLazo(vm: BoardViewModel, s: Float, r: RecursosDibujo) {
+    val grosor = maxOf(2f, 2f / s * r.densidad)
+    val guion = PathEffect.dashPathEffect(floatArrayOf(10f / s * r.densidad, 7f / s * r.densidad))
+    val n = vm.lazoN
+    if (n > 1) {
+        val p = Path().apply {
+            moveTo(vm.lazoXs[0], vm.lazoYs[0])
+            for (i in 1 until n) lineTo(vm.lazoXs[i], vm.lazoYs[i])
+        }
+        drawPath(p, Paleta.Lazo, style = Stroke(width = grosor, pathEffect = guion))
+    }
+    val sel = vm.lazoSel
+    if (sel.isNotEmpty()) {
+        var caja = sel.first().bounds
+        for (t in sel) {
+            caja = caja.union(t.bounds)
+            drawRect(Paleta.Lazo.copy(alpha = 0.12f), Offset(t.bounds.left, t.bounds.top), Size(t.bounds.width, t.bounds.height))
+        }
+        drawRect(
+            Paleta.Lazo,
+            Offset(caja.left, caja.top),
+            Size(caja.width, caja.height),
+            style = Stroke(width = grosor, pathEffect = guion),
+        )
     }
 }
 

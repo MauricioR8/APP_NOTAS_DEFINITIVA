@@ -260,6 +260,10 @@ class BoardViewModel(private val repo: ZettelRepository) : ViewModel() {
                 }
             }
             Herramienta.BORRADOR -> borrarEn(wx, wy)
+            Herramienta.LAZO -> {
+                limpiarLazo()
+                anadirPuntoLazo(wx, wy)
+            }
             else -> Unit
         }
     }
@@ -268,6 +272,11 @@ class BoardViewModel(private val repo: ZettelRepository) : ViewModel() {
         val e = escena ?: return
         if (h == Herramienta.BORRADOR) {
             borrarEn(wx, wy)
+            return
+        }
+        if (h == Herramienta.LAZO) {
+            anadirPuntoLazo(wx, wy)
+            e.redibujar()
             return
         }
         when (modo) {
@@ -290,6 +299,7 @@ class BoardViewModel(private val repo: ZettelRepository) : ViewModel() {
         }
         modo = Modo.NADA
         objetivo = null
+        if (h == Herramienta.LAZO) cerrarLazo()
         if (h == Herramienta.BORRADOR && borrados.isNotEmpty()) {
             val ids = borrados.toList()
             borrados.clear()
@@ -322,6 +332,100 @@ class BoardViewModel(private val repo: ZettelRepository) : ViewModel() {
             persistir { repo.guardarTrazo(entidad) }
         }
         e.redibujar()
+    }
+
+    // ---- Lazo ------------------------------------------------------------------------------
+    // El trazo del lazo se guarda en arrays simples (no es estado) y se redibuja con escena.redibujar().
+    internal var lazoXs = FloatArray(256)
+    internal var lazoYs = FloatArray(256)
+    internal var lazoN = 0
+
+    /** Trazos libres encerrados por el último lazo. */
+    var lazoSel by mutableStateOf<List<StrokeData>>(emptyList())
+        private set
+
+    fun elegirHerramienta(h: Herramienta) {
+        if (h != Herramienta.LAZO) limpiarLazo()
+        herramienta = h
+    }
+
+    fun limpiarLazo() {
+        lazoN = 0
+        if (lazoSel.isNotEmpty()) lazoSel = emptyList()
+        escena?.redibujar()
+    }
+
+    private fun anadirPuntoLazo(wx: Float, wy: Float) {
+        if (lazoN == lazoXs.size) {
+            lazoXs = lazoXs.copyOf(lazoN * 2)
+            lazoYs = lazoYs.copyOf(lazoN * 2)
+        }
+        lazoXs[lazoN] = wx
+        lazoYs[lazoN] = wy
+        lazoN++
+    }
+
+    /** Al soltar el lápiz: selecciona los trazos libres con más de la mitad de sus puntos dentro. */
+    private fun cerrarLazo() {
+        val e = escena ?: return
+        if (lazoN < 3) {
+            limpiarLazo()
+            return
+        }
+        var minX = Float.MAX_VALUE
+        var minY = Float.MAX_VALUE
+        var maxX = -Float.MAX_VALUE
+        var maxY = -Float.MAX_VALUE
+        for (i in 0 until lazoN) {
+            minX = minOf(minX, lazoXs[i]); maxX = maxOf(maxX, lazoXs[i])
+            minY = minOf(minY, lazoYs[i]); maxY = maxOf(maxY, lazoYs[i])
+        }
+        val zona = WRect(minX, minY, maxX, maxY)
+        val p = FloatArray(2)
+        val elegidos = ArrayList<StrokeData>()
+        for (item in e.arbol.consultar(zona)) {
+            if (item !is StrokeData || !item.bounds.intersects(zona)) continue
+            var dentro = 0
+            val n = item.numPuntos
+            for (i in 0 until n) {
+                item.punto(i, 0f, 0f, p)
+                if (com.marco.zettel.domain.Geometry.puntoEnPoligono(p[0], p[1], lazoXs, lazoYs, lazoN)) dentro++
+            }
+            if (n > 0 && dentro * 2 >= n) elegidos.add(item)
+        }
+        lazoN = 0
+        lazoSel = elegidos
+        e.redibujar()
+    }
+
+    /** Convierte los trazos seleccionados con el lazo en un zettel nuevo (fugaz) sobre el tablero. */
+    fun lazoAZettel() {
+        val e = escena ?: return
+        val sel = lazoSel
+        if (sel.isEmpty()) return
+        var caja = sel.first().bounds
+        sel.forEach { caja = caja.union(it.bounds) }
+        val margen = 16f
+        val x = caja.left - margen
+        val y = caja.top - margen
+        val w = maxOf(caja.width + 2 * margen, MIN_ANCHO)
+        val h = maxOf(caja.height + 2 * margen, MIN_ALTO)
+        limpiarLazo()
+        viewModelScope.launch {
+            val nota = repo.crearNota(NoteType.FLEETING)
+            val ub = repo.colocar(nota.id, e.boardId, x, y, w, h)
+            if (escena !== e) return@launch
+            val c = CardData(ub.id, nota, ub.x, ub.y, ub.width, ub.height, ub.zIndex)
+            for (t in sel) {
+                e.quitarTrazoLibre(t)
+                // El trazo conserva sus coordenadas; solo cambia de dueño y de origen.
+                t.entity = t.entity.copy(noteId = nota.id, originX = ub.x, originY = ub.y)
+                c.strokes.add(t)
+            }
+            e.agregarTarjeta(c)
+            persistir { repo.moverTrazosANota(sel.map { it.id }, nota.id, ub.x, ub.y) }
+            seleccionar(c)
+        }
     }
 
     // ---- Borrador --------------------------------------------------------------------------

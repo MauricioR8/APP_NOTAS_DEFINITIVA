@@ -42,10 +42,10 @@ fun Toolbar(vm: BoardViewModel, modifier: Modifier = Modifier) {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            listOf(Herramienta.PLUMA, Herramienta.BORRADOR, Herramienta.MOVER).forEach { h ->
+            listOf(Herramienta.PLUMA, Herramienta.BORRADOR, Herramienta.LAZO, Herramienta.MOVER).forEach { h ->
                 FilterChip(
                     selected = vm.herramienta == h,
-                    onClick = { vm.herramienta = h },
+                    onClick = { vm.elegirHerramienta(h) },
                     label = { Text(h.etiqueta) },
                 )
             }
