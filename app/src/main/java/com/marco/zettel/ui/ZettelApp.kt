@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.marco.zettel.ui.canvas.BoardCanvas
+import com.marco.zettel.ui.inbox.InboxPanel
 import com.marco.zettel.ui.panel.PanelEnlace
 import com.marco.zettel.ui.panel.SidePanel
 
@@ -31,11 +32,13 @@ fun ZettelApp(vm: BoardViewModel) {
             Box(Modifier.fillMaxSize().safeDrawingPadding()) {
                 BoardCanvas(vm)
                 Toolbar(vm, Modifier.align(Alignment.TopCenter).padding(8.dp))
-                Breadcrumb(vm, Modifier.align(Alignment.TopStart).padding(8.dp).widthIn(max = 420.dp))
+                Breadcrumb(vm, Modifier.align(Alignment.TopStart).padding(start = 8.dp, top = 76.dp).widthIn(max = 460.dp))
+                if (vm.bandejaAbierta) InboxPanel(vm, Modifier.align(Alignment.CenterStart))
 
                 // Atrás: primero cierra selección/lazo, luego sube un nivel en la ruta de tableros.
-                BackHandler(enabled = vm.tarjetaSel != null || vm.enlaceSel != null || vm.lazoSel.isNotEmpty() || vm.ruta.size > 1) {
+                BackHandler(enabled = vm.bandejaAbierta || vm.tarjetaSel != null || vm.enlaceSel != null || vm.lazoSel.isNotEmpty() || vm.ruta.size > 1) {
                     when {
+                        vm.bandejaAbierta -> vm.bandejaAbierta = false
                         vm.lazoSel.isNotEmpty() -> vm.limpiarLazo()
                         vm.tarjetaSel != null || vm.enlaceSel != null -> vm.deseleccionar()
                         else -> vm.subirNivel()

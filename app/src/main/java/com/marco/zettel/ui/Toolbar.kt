@@ -19,6 +19,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -86,6 +87,10 @@ fun Toolbar(vm: BoardViewModel, modifier: Modifier = Modifier) {
                         onClick = { menu = false; vm.nuevaTarjeta(NoteType.INDEX) },
                     )
                 }
+            }
+            val pendientes by vm.bandeja.collectAsState()
+            FilledTonalButton(onClick = { vm.bandejaAbierta = !vm.bandejaAbierta }) {
+                Text("Bandeja (${pendientes.size})")
             }
             TextButton(onClick = { vm.camara.restablecerZoom(vm.vistaAncho, vm.vistaAlto) }) { Text("1:1") }
         }

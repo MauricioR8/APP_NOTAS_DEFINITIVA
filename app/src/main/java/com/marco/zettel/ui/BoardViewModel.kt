@@ -286,6 +286,59 @@ class BoardViewModel(private val repo: ZettelRepository) : ViewModel() {
         }
     }
 
+    // ---- Bandeja de entrada ----------------------------------------------------------------
+    val bandeja: StateFlow<List<NoteEntity>> =
+        repo.bandeja().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val huerfanas: StateFlow<List<NoteEntity>> =
+        repo.huerfanas().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    var bandejaAbierta by mutableStateOf(false)
+
+    /** Captura rápida: la primera línea es el título y el resto el contenido. */
+    fun capturaRapida(texto: String) {
+        val t = texto.trim()
+        if (t.isEmpty()) return
+        val lineas = t.lines()
+        val titulo = lineas.first().take(80)
+        val resto = lineas.drop(1).joinToString("\n").trim()
+        viewModelScope.launch { repo.crearNota(NoteType.FLEETING, titulo, resto) }
+    }
+
+    /** Procesar: coloca una nota de la bandeja en el tablero abierto (o la localiza si ya está). */
+    fun colocarNota(n: NoteEntity) {
+        val e = escena ?: return
+        val existente = e.tarjetaPorNota[n.id]
+        if (existente != null) {
+            camara.centrarEn(existente.x + existente.w / 2, existente.y + existente.h / 2, vistaAncho, vistaAlto)
+            seleccionar(existente)
+            return
+        }
+        val (cx, cy) = centroVista()
+        transcluir(n, cx - ANCHO_TARJETA / 2, cy - ALTO_TARJETA / 2)
+    }
+
+    fun cambiarTipoNota(n: NoteEntity, tipo: NoteType) {
+        val carta = escena?.tarjetaPorNota?.get(n.id)
+        if (carta != null) {
+            editarNota(carta, tipo = tipo)
+            return
+        }
+        viewModelScope.launch {
+            val actual = repo.obtenerNota(n.id) ?: return@launch
+            persistir { repo.guardarContenido(actual.copy(type = tipo.name)) }
+        }
+    }
+
+    fun eliminarNotaPorId(n: NoteEntity) {
+        val carta = escena?.tarjetaPorNota?.get(n.id)
+        if (carta != null) {
+            eliminarNota(carta)
+        } else {
+            pendientes.remove(n.id)
+            persistir { repo.eliminarNota(n.id) }
+        }
+    }
+
     // ---- Enlaces ---------------------------------------------------------------------------
     /** Dibujar un conector entre dos tarjetas crea un enlace real entre sus notas. */
     private fun conectar(a: CardData, b: CardData) {
