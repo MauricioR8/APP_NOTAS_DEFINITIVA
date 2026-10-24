@@ -31,7 +31,7 @@ fun ZettelApp(vm: BoardViewModel) {
         Surface(Modifier.fillMaxSize()) {
             Box(Modifier.fillMaxSize().safeDrawingPadding()) {
                 BoardCanvas(vm)
-                Toolbar(vm, Modifier.align(Alignment.TopCenter).padding(8.dp))
+                Toolbar(vm, Modifier.align(Alignment.TopCenter).padding(8.dp).widthIn(max = 1100.dp))
                 Breadcrumb(vm, Modifier.align(Alignment.TopStart).padding(start = 8.dp, top = 76.dp).widthIn(max = 460.dp))
                 if (vm.bandejaAbierta) InboxPanel(vm, Modifier.align(Alignment.CenterStart))
 
