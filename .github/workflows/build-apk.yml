@@ -1,0 +1,45 @@
+name: Compilar APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Tests unitarios
+        run: ./gradlew testDebugUnitTest --stacktrace
+
+      - name: Compilar APK (release, firmado con llave debug)
+        run: ./gradlew assembleRelease --stacktrace
+
+      - name: Renombrar APK
+        run: cp app/build/outputs/apk/release/app-release.apk zettel-notas.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zettel-notas-apk
+          path: zettel-notas.apk
+
+      - name: Publicar en el release "ultimo"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete ultimo --yes --cleanup-tag || true
+          gh release create ultimo zettel-notas.apk \
+            --title "APK más reciente (build ${{ github.run_number }})" \
+            --notes "Compilado desde ${{ github.sha }}. Descarga zettel-notas.apk e instálalo en la tablet."
