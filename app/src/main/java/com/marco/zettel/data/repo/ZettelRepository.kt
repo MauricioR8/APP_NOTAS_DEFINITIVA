@@ -49,6 +49,10 @@ class ZettelRepository(private val db: AppDatabase) {
 
     suspend fun obtenerNota(id: String): NoteEntity? = notas.get(id)
 
+    suspend fun trazosDeNota(noteId: String): List<StrokeEntity> = trazos.strokesOfNote(noteId)
+
+    suspend fun enlacesDeNota(noteId: String): List<LinkEntity> = enlaces.linksOfNote(noteId)
+
     /** Crea una nota con id único permanente. */
     suspend fun crearNota(
         tipo: NoteType,

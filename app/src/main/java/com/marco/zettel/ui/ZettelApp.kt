@@ -1,6 +1,8 @@
 package com.marco.zettel.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -29,6 +31,16 @@ fun ZettelApp(vm: BoardViewModel) {
             Box(Modifier.fillMaxSize().safeDrawingPadding()) {
                 BoardCanvas(vm)
                 Toolbar(vm, Modifier.align(Alignment.TopCenter).padding(8.dp))
+                Breadcrumb(vm, Modifier.align(Alignment.TopStart).padding(8.dp).widthIn(max = 420.dp))
+
+                // Atrás: primero cierra selección/lazo, luego sube un nivel en la ruta de tableros.
+                BackHandler(enabled = vm.tarjetaSel != null || vm.enlaceSel != null || vm.lazoSel.isNotEmpty() || vm.ruta.size > 1) {
+                    when {
+                        vm.lazoSel.isNotEmpty() -> vm.limpiarLazo()
+                        vm.tarjetaSel != null || vm.enlaceSel != null -> vm.deseleccionar()
+                        else -> vm.subirNivel()
+                    }
+                }
                 if (vm.lazoSel.isNotEmpty()) {
                     Surface(
                         Modifier.align(Alignment.BottomCenter).padding(24.dp),

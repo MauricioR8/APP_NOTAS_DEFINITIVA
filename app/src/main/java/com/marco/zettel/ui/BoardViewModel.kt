@@ -6,9 +6,11 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.ink.strokes.Stroke
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.marco.zettel.data.db.LinkedNoteRow
 import com.marco.zettel.data.db.NoteEntity
 import com.marco.zettel.data.repo.BoardSnapshot
 import com.marco.zettel.data.repo.StrokeCodec
@@ -22,9 +24,17 @@ import com.marco.zettel.ui.canvas.CardData
 import com.marco.zettel.ui.canvas.LinkData
 import com.marco.zettel.ui.canvas.StrokeData
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -36,6 +46,9 @@ enum class Herramienta(val etiqueta: String) {
     MOVER("Mover"),
     CONECTAR("Conectar"),
 }
+
+/** Elemento del breadcrumb: un tablero abierto en la ruta actual. */
+class Miga(val id: String, val titulo: String)
 
 /**
  * Estado del tablero abierto. La escena vive en memoria y es la fuente de verdad en pantalla;
@@ -134,6 +147,51 @@ class BoardViewModel(private val repo: ZettelRepository) : ViewModel() {
     private fun centroVista(): Pair<Float, Float> =
         camara.mundoX(vistaAncho / 2f) to camara.mundoY(vistaAlto / 2f)
 
+    // ---- Tableros anidados y breadcrumb ----------------------------------------------------
+    var ruta by mutableStateOf(listOf(Miga(ROOT_BOARD_ID, "Inicio")))
+        private set
+
+    /**
+     * Abre una nota INDEX como su propio canvas. Si ya está en la ruta (un ciclo, o un clic en
+     * el breadcrumb) la ruta se recorta hasta ella en vez de crecer sin fin.
+     */
+    fun abrirTablero(id: String, titulo: String) {
+        vaciarPendientes()
+        viewModelScope.launch {
+            val idx = ruta.indexOfFirst { it.id == id }
+            val nueva = if (idx >= 0) ruta.take(idx + 1) else ruta + Miga(id, titulo.ifBlank { "Sin título" })
+            if (cargar(id)) {
+                ruta = nueva
+            } else {
+                // El tablero ya no existe (se eliminó): volver al raíz.
+                ruta = listOf(Miga(ROOT_BOARD_ID, "Inicio"))
+                cargar(ROOT_BOARD_ID)
+            }
+        }
+    }
+
+    fun irARuta(indice: Int) {
+        val m = ruta.getOrNull(indice) ?: return
+        if (indice != ruta.lastIndex) abrirTablero(m.id, m.titulo)
+    }
+
+    /** Sube un nivel en la ruta; devuelve false si ya estamos en el raíz. */
+    fun subirNivel(): Boolean {
+        if (ruta.size < 2) return false
+        irARuta(ruta.size - 2)
+        return true
+    }
+
+    fun renombrarTableroActual(titulo: String) {
+        val e = escena ?: return
+        val id = e.boardId
+        ruta = ruta.map { if (it.id == id) Miga(id, titulo.ifBlank { "Sin título" }) else it }
+        viewModelScope.launch {
+            val n = repo.obtenerNota(id) ?: return@launch
+            persistir { repo.guardarContenido(n.copy(title = titulo)) }
+        }
+    }
+
     // ---- Selección -------------------------------------------------------------------------
     var enlaceSel by mutableStateOf<LinkData?>(null)
         private set
@@ -158,6 +216,74 @@ class BoardViewModel(private val repo: ZettelRepository) : ViewModel() {
         tarjetaSel = null
         enlaceSel?.enSeleccion = false
         enlaceSel = null
+    }
+
+    // ---- Backlinks y contexto de la nota seleccionada --------------------------------------
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun <T> deNotaSeleccionada(vacio: List<T>, consulta: (String) -> Flow<List<T>>): StateFlow<List<T>> =
+        snapshotFlow { tarjetaSel?.note?.id }
+            .distinctUntilChanged()
+            .flatMapLatest { id -> if (id == null) flowOf(vacio) else consulta(id) }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, vacio)
+
+    /** Notas que enlazan a la seleccionada. */
+    val backlinks = deNotaSeleccionada(emptyList<LinkedNoteRow>()) { repo.backlinks(it) }
+
+    /** Notas a las que enlaza la seleccionada. */
+    val salientes = deNotaSeleccionada(emptyList<LinkedNoteRow>()) { repo.salientes(it) }
+
+    /** Tableros donde aparece la nota seleccionada (transclusión). */
+    val tablerosConNota = deNotaSeleccionada(emptyList<NoteEntity>()) { repo.tablerosConNota(it) }
+
+    /** Centra la vista en la nota; si no está en este tablero la trae (transclusión). */
+    fun irANota(n: NoteEntity) {
+        val e = escena ?: return
+        val existente = e.tarjetaPorNota[n.id]
+        if (existente != null) {
+            camara.centrarEn(existente.x + existente.w / 2, existente.y + existente.h / 2, vistaAncho, vistaAlto)
+            seleccionar(existente)
+            return
+        }
+        val ref = tarjetaSel
+        val (cx, cy) = centroVista()
+        transcluir(n, ref?.let { it.x + it.w + 60f } ?: (cx - ANCHO_TARJETA / 2), ref?.y ?: (cy - ALTO_TARJETA / 2))
+    }
+
+    /**
+     * Pone en este tablero una nota que ya existe, sin copiarla: es la misma nota (misma id, mismo
+     * texto y trazos) con una ubicación nueva. Editarla aquí la actualiza en todos los tableros.
+     */
+    private fun transcluir(n: NoteEntity, x: Float, y: Float) {
+        val e = escena ?: return
+        viewModelScope.launch {
+            val nota = repo.obtenerNota(n.id) ?: return@launch
+            val ub = repo.colocar(nota.id, e.boardId, x, y, ANCHO_TARJETA, ALTO_TARJETA)
+            val trazos = if (nota.type == NoteType.INDEX.name) {
+                emptyList()
+            } else {
+                withContext(Dispatchers.Default) {
+                    repo.trazosDeNota(nota.id).mapNotNull {
+                        try {
+                            StrokeData(it, StrokeCodec.deEntidad(it))
+                        } catch (ex: Exception) {
+                            null
+                        }
+                    }
+                }
+            }
+            val enlacesNota = repo.enlacesDeNota(nota.id)
+            if (escena !== e || e.tarjetaPorNota.containsKey(nota.id)) return@launch
+            val c = CardData(ub.id, nota, ub.x, ub.y, ub.width, ub.height, ub.zIndex)
+            c.strokes.addAll(trazos)
+            e.agregarTarjeta(c)
+            for (l in enlacesNota) {
+                if (e.tarjetaPorNota.containsKey(l.sourceNoteId) && e.tarjetaPorNota.containsKey(l.targetNoteId)) {
+                    e.enlaces.add(LinkData(l.id, l.sourceNoteId, l.targetNoteId, l.relationType))
+                }
+            }
+            camara.centrarEn(c.x + c.w / 2, c.y + c.h / 2, vistaAncho, vistaAlto)
+            seleccionar(c)
+        }
     }
 
     // ---- Enlaces ---------------------------------------------------------------------------
@@ -232,6 +358,9 @@ class BoardViewModel(private val repo: ZettelRepository) : ViewModel() {
             type = tipo?.name ?: c.note.type,
         )
         c.note = n
+        if (titulo != null && ruta.any { it.id == n.id }) {
+            ruta = ruta.map { if (it.id == n.id) Miga(n.id, titulo.ifBlank { "Sin título" }) else it }
+        }
         pendientes[n.id] = n
         jobGuardado?.cancel()
         jobGuardado = viewModelScope.launch {
@@ -270,6 +399,7 @@ class BoardViewModel(private val repo: ZettelRepository) : ViewModel() {
         val c = e.tarjetaEn(wx, wy)
         if (c != null) {
             seleccionar(c)
+            if (doble && c.tipo == NoteType.INDEX) abrirTablero(c.note.id, c.note.title)
             return
         }
         val l = e.enlaceEn(wx, wy, TOLERANCIA_PX / camara.scale)

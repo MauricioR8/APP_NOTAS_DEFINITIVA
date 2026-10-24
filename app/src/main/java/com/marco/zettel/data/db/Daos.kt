@@ -61,6 +61,9 @@ interface StrokeDao {
     @Query("UPDATE strokes SET note_id = :noteId, origin_x = :originX, origin_y = :originY WHERE id = :id")
     suspend fun moveToNote(id: String, noteId: String, originX: Float, originY: Float)
 
+    @Query("SELECT * FROM strokes WHERE note_id = :noteId")
+    suspend fun strokesOfNote(noteId: String): List<StrokeEntity>
+
     /** Trazos libres del tablero y los de las tarjetas colocadas en él. */
     @Query(
         """SELECT * FROM strokes WHERE note_id = :boardId
@@ -82,6 +85,9 @@ interface LinkDao {
 
     @Query("SELECT * FROM links WHERE source_note_id = :source AND target_note_id = :target")
     suspend fun find(source: String, target: String): LinkEntity?
+
+    @Query("SELECT * FROM links WHERE source_note_id = :noteId OR target_note_id = :noteId")
+    suspend fun linksOfNote(noteId: String): List<LinkEntity>
 
     /** Enlaces entre notas que están colocadas en el tablero. */
     @Query(
